@@ -8,11 +8,7 @@
         class="task-input"
       />
 
-      <button
-        type="submit"
-        class="task-button"
-        :disabled="uploading"
-      >
+      <button type="submit" class="task-button" :disabled="uploading">
         {{ editingTask ? 'Alterar' : 'Adicionar' }}
       </button>
 
@@ -26,27 +22,19 @@
       </button>
     </div>
 
-    <!-- Upload de imagem aparece somente ao editar -->
-    <div v-if="editingTask" class="image-section">
-
+    <div class="image-section">
       <img
-        v-if="previewUrl || editingTask.img_url"
-        :src="previewUrl || editingTask.img_url"
+        v-if="previewUrl || editingTask?.img_url"
+        :src="previewUrl || editingTask?.img_url"
         class="image-preview"
         alt="Imagem da tarefa"
       />
 
-      <label
-        class="image-label"
-        :class="{ disabled: uploading }"
-      >
-        <span v-if="uploading" class="upload-status">
-          Enviando...
-        </span>
-
+      <label class="image-label" :class="{ disabled: uploading }">
+        <span v-if="uploading" class="upload-status">Enviando...</span>
         <span v-else>
           {{
-            previewUrl || editingTask.img_url
+            previewUrl || editingTask?.img_url
               ? 'Trocar imagem'
               : 'Adicionar imagem'
           }}
@@ -55,11 +43,30 @@
         <input
           type="file"
           accept="image/jpeg,image/png"
+          capture="environment"
           class="image-input"
           :disabled="uploading"
           @change="handleImageChange"
         />
       </label>
+
+      <button
+        type="button"
+        class="task-button-cancel"
+        @click="showCameraCapture = !showCameraCapture"
+      >
+        {{ showCameraCapture ? 'Fechar câmera' : 'Abrir preview ao vivo' }}
+      </button>
+
+      <p class="image-help">
+        Em celular, o botão pode abrir a câmera.
+        Em notebook, abre o seletor de arquivos.
+      </p>
+
+      <CameraCapture
+        v-if="showCameraCapture"
+        @captured="handleCameraCapture"
+      />
     </div>
   </form>
 </template>
@@ -67,6 +74,7 @@
 <script setup>
 import { ref, watch } from 'vue'
 import tasksApi from '../api/tasksApi.js'
+import CameraCapture from './CameraCapture.vue'
 
 const props = defineProps({
   editingTask: {
@@ -81,11 +89,13 @@ const newTask = ref('')
 const previewUrl = ref(null)
 const imgAttachmentKey = ref(null)
 const uploading = ref(false)
+const showCameraCapture = ref(false)
 
 watch(
   () => props.editingTask,
   (task) => {
     newTask.value = task ? task.title : ''
+    if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
     previewUrl.value = null
     imgAttachmentKey.value = null
   },
@@ -93,26 +103,43 @@ watch(
 
 async function handleImageChange(event) {
   const file = event.target.files[0]
-
   if (!file) return
 
-  // Mostra a imagem imediatamente
+  if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
   previewUrl.value = URL.createObjectURL(file)
-
   uploading.value = true
 
   try {
     const response = await tasksApi.uploadImage(file)
-
     imgAttachmentKey.value = response.data.attachment_key
   } catch (err) {
     console.error('Erro ao fazer upload da imagem', err)
-
     previewUrl.value = null
     imgAttachmentKey.value = null
   } finally {
     uploading.value = false
   }
+}
+
+function handleCameraCapture(file) {
+  if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
+  previewUrl.value = URL.createObjectURL(file)
+  uploading.value = true
+  showCameraCapture.value = false
+
+  tasksApi
+    .uploadImage(file)
+    .then((response) => {
+      imgAttachmentKey.value = response.data.attachment_key
+    })
+    .catch((err) => {
+      console.error('Erro ao fazer upload da imagem', err)
+      previewUrl.value = null
+      imgAttachmentKey.value = null
+    })
+    .finally(() => {
+      uploading.value = false
+    })
 }
 
 function handleSubmit() {
@@ -123,22 +150,23 @@ function handleSubmit() {
       'update',
       props.editingTask.id,
       newTask.value.trim(),
-      imgAttachmentKey.value
+      imgAttachmentKey.value,
     )
   } else {
-    emit('add', newTask.value.trim())
+    emit('add', newTask.value.trim(), imgAttachmentKey.value)
   }
 
   newTask.value = ''
+  if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
   previewUrl.value = null
   imgAttachmentKey.value = null
 }
 
 function handleCancel() {
   newTask.value = ''
+  if (previewUrl.value) URL.revokeObjectURL(previewUrl.value)
   previewUrl.value = null
   imgAttachmentKey.value = null
-
   emit('cancel')
 }
 </script>
@@ -205,6 +233,7 @@ function handleCancel() {
 .image-section {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
   padding: 10px 12px;
   background: #f8f9fa;
@@ -245,5 +274,12 @@ function handleCancel() {
 
 .upload-status {
   color: #888;
+}
+
+.image-help {
+  font-size: 0.75rem;
+  color: #999;
+  margin: 0;
+  flex-basis: 100%;
 }
 </style>
